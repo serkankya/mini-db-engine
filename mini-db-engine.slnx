@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="MiniDbEngine.Playground/MiniDbEngine.Playground.csproj" />
+  <Project Path="MiniDbEngine.Tests/MiniDbEngine.Tests.csproj" />
+  <Project Path="MiniDbEngine/MiniDbEngine.csproj" />
+</Solution>
