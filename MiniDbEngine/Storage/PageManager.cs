@@ -64,7 +64,7 @@
 			_fileStream.Flush(flushToDisk: true);
 		}
 
-		private readonly bool _disposed = false;
+		private bool _disposed = false;
 
 		public void Dispose()
 		{
@@ -75,6 +75,7 @@
 					_fileStream.Flush(flushToDisk: true);
 					_fileStream.Dispose();
 				}
+				_disposed = true;
 			}
 		}
 	}

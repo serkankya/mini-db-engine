@@ -1,4 +1,5 @@
 ﻿using MiniDbEngine.Storage;
+using System.Text;
 
 namespace MiniDbEngine.Tests
 {
@@ -35,6 +36,25 @@ namespace MiniDbEngine.Tests
 			{
 				File.Delete(dbPath);
 			}
+		}
+
+		[Fact]
+		public void Insert_And_Get_Record_Should_Work_Correctly()
+		{
+			Page page = new();
+
+			byte[] keyToInsert = Encoding.UTF8.GetBytes("user:1000");
+			byte[] valueToInsert = Encoding.UTF8.GetBytes("testUser1");
+
+			bool isInserted = page.InsertRecord(keyToInsert, valueToInsert);
+
+			Assert.True(isInserted);
+			Assert.Equal(1, page.RecordCount);
+
+			page.GetRecord(0, out ReadOnlySpan<byte> retrievedKey, out ReadOnlySpan<byte> retrievedValue);
+
+			Assert.True(retrievedKey.SequenceEqual(keyToInsert));
+			Assert.True(retrievedValue.SequenceEqual(valueToInsert));
 		}
 	}
 }
