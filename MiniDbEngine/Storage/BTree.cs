@@ -5,12 +5,15 @@ namespace MiniDbEngine.Storage
 	public class BTree
 	{
 		private readonly PageManager _pm;
+		private readonly WalManager _wal;
 		private int _rootPageId;
 
-		public BTree(PageManager pm)
+		public BTree(PageManager pm, WalManager wal)
 		{
 			_pm = pm;
+			_wal = wal;
 			InitializeMetaPage();
+			RecoverFromWal();
 		}
 
 		//page 0 is always the Meta Page. it acts as the entry point and stores the RootPageId
@@ -56,6 +59,15 @@ namespace MiniDbEngine.Storage
 
 		public void Put(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
 		{
+			//1. Write ahead logging
+			_wal.LogPut(key, value);
+
+			//2. Actual B-Tree insertion
+			InternalPut(key, value);
+		}
+
+		private void InternalPut(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+		{
 			Page current = _pm.ReadPage(_rootPageId);
 			Stack<Page> path = new();
 
@@ -66,15 +78,78 @@ namespace MiniDbEngine.Storage
 				current = _pm.ReadPage(childId);
 			}
 
-			//if theres a enough space in the leaf page, just insert and return
 			if (current.InsertRecord(key, value))
 			{
 				_pm.WritePage(current);
 				return;
 			}
 
-			//page is full. trigger B+Tree Split operation
 			SplitNode(current, key, value, path);
+		}
+
+		public void Delete(ReadOnlySpan<byte> key)
+		{
+			// 1. Write ahead logging for durability
+			_wal.LogDelete(key);
+
+			// 2. Actual B-Tree deletion
+			InternalDelete(key);
+		}
+
+		private void InternalDelete(ReadOnlySpan<byte> key)
+		{
+			Page current = _pm.ReadPage(_rootPageId);
+
+			while (current.PageType != 1)
+			{
+				int childId = GetChildPageId(current, key);
+				current = _pm.ReadPage(childId);
+			}
+
+			if (current.DeleteRecord(key))
+			{
+				_pm.WritePage(current);
+			}
+		}
+
+		/// <summary>
+		/// Performs a Range Scan by traversing the leaf nodes via the RightPointer linked list.
+		/// This is an O(log N + K) operation, showcasing the true power of a B+Tree.
+		/// </summary>
+		public IEnumerable<KeyValuePair<byte[], byte[]>> Scan(ReadOnlySpan<byte> startKey, ReadOnlySpan<byte> endKey)
+		{
+			Page current = _pm.ReadPage(_rootPageId);
+
+			while (current.PageType != 1)
+			{
+				int childId = GetChildPageId(current, startKey);
+				current = _pm.ReadPage(childId);
+			}
+
+			bool stop = false;
+			while (current != null && !stop)
+			{
+				for (int i = 0; i < current.RecordCount; i++)
+				{
+					current.GetRecord(i, out ReadOnlySpan<byte> k, out ReadOnlySpan<byte> v);
+
+					if (k.SequenceCompareTo(startKey) < 0) continue;
+
+					if (k.SequenceCompareTo(endKey) > 0)
+					{
+						stop = true;
+						break;
+					}
+
+					yield return new KeyValuePair<byte[], byte[]>(k.ToArray(), v.ToArray());
+				}
+
+				if (stop || current.RightPointer == 0)
+					break;
+
+				//jump to the next sibling page instantly
+				current = _pm.ReadPage(current.RightPointer);
+			}
 		}
 
 		private int GetChildPageId(Page internalPage, ReadOnlySpan<byte> key)
@@ -99,7 +174,7 @@ namespace MiniDbEngine.Storage
 			List<KeyValuePair<byte[], byte[]>> allRecords = new List<KeyValuePair<byte[], byte[]>>();
 			for (int i = 0; i < page.RecordCount; i++)
 			{
-				page.GetRecord(i, out var k, out var v);
+				page.GetRecord(i, out ReadOnlySpan<byte> k, out ReadOnlySpan<byte> v);
 				allRecords.Add(new KeyValuePair<byte[], byte[]>(k.ToArray(), v.ToArray()));
 			}
 			allRecords.Add(new KeyValuePair<byte[], byte[]>(newKey.ToArray(), newValue.ToArray()));
@@ -171,6 +246,56 @@ namespace MiniDbEngine.Storage
 					SplitNode(parent, splitKey, rightPageIdBytes, path);
 				}
 			}
+		}
+
+		private void RecoverFromWal()
+		{
+			if (!File.Exists(_wal.FilePath))
+				return;
+
+			using FileStream walStream = new FileStream(_wal.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+			if (walStream.Length == 0)
+				return;
+
+			Console.WriteLine("Crash detected. Recovering from WAL...");
+
+			byte[] header = new byte[5];
+			while (walStream.Position < walStream.Length)
+			{
+				int read = walStream.Read(header, 0, 1);
+				if (read < 1) break;
+
+				byte opCode = header[0];
+
+				if (opCode == 1) // PUT Operation
+				{
+					walStream.ReadExactly(header, 1, 4); //read KeyLen (2) + ValLen (2)
+					ushort keyLen = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(1, 2));
+					ushort valLen = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(3, 2));
+
+					byte[] key = new byte[keyLen];
+					byte[] value = new byte[valLen];
+					walStream.ReadExactly(key, 0, keyLen);
+					walStream.ReadExactly(value, 0, valLen);
+
+					InternalPut(key, value);
+				}
+				else if (opCode == 2) // DELETE Operation
+				{
+					walStream.ReadExactly(header, 1, 2); //read KeyLen (2)
+					ushort keyLen = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(1, 2));
+
+					byte[] key = new byte[keyLen];
+					walStream.ReadExactly(key, 0, keyLen);
+
+					InternalDelete(key);
+				}
+			}
+
+			_pm.SyncToDisk();
+			_wal.Clear();
+			Console.WriteLine("Recovery complete.");
 		}
 	}
 }

@@ -180,6 +180,33 @@ namespace MiniDbEngine.Storage
 			return false;
 		}
 
+		/// <summary>
+		/// Logically deletes a record by removing its pointer from the slot array.
+		/// A production engine would run a page compaction algorithm to reclaim this space.
+		/// </summary>
+		public bool DeleteRecord(ReadOnlySpan<byte> key)
+		{
+			if (!BinarySearch(key, out int index))
+			{
+				return false; //key not found
+			}
+
+			if (index < RecordCount - 1)
+			{
+				int shiftStartOffset = HeaderSize + ((index + 1) * 2);
+				int destOffset = HeaderSize + (index * 2);
+				int shiftLength = (RecordCount - 1 - index) * 2;
+
+				Array.Copy(
+					sourceArray: _buffer, sourceIndex: shiftStartOffset,
+					destinationArray: _buffer, destinationIndex: destOffset,
+					length: shiftLength);
+			}
+
+			RecordCount--;
+			return true;
+		}
+
 		public void WriteTo(Stream stream)
 		{
 			stream.Write(AsSpan());
