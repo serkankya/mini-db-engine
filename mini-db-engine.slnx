@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="MiniDbEngine.Benchmarks/MiniDbEngine.Benchmarks.csproj" Id="5b8a91b3-068f-431e-886c-a6f225c9be0f" />
   <Project Path="MiniDbEngine.Playground/MiniDbEngine.Playground.csproj" />
   <Project Path="MiniDbEngine.Tests/MiniDbEngine.Tests.csproj" />
   <Project Path="MiniDbEngine/MiniDbEngine.csproj" />

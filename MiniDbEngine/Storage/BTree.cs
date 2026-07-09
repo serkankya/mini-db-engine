@@ -116,8 +116,9 @@ namespace MiniDbEngine.Storage
 		/// Performs a Range Scan by traversing the leaf nodes via the RightPointer linked list.
 		/// This is an O(log N + K) operation, showcasing the true power of a B+Tree.
 		/// </summary>
-		public IEnumerable<KeyValuePair<byte[], byte[]>> Scan(ReadOnlySpan<byte> startKey, ReadOnlySpan<byte> endKey)
+		public IEnumerable<KeyValuePair<byte[], byte[]>> Scan(byte[] startKey, byte[] endKey)
 		{
+			List<KeyValuePair<byte[], byte[]>> results = new List<KeyValuePair<byte[], byte[]>>();
 			Page current = _pm.ReadPage(_rootPageId);
 
 			while (current.PageType != 1)
@@ -141,7 +142,7 @@ namespace MiniDbEngine.Storage
 						break;
 					}
 
-					yield return new KeyValuePair<byte[], byte[]>(k.ToArray(), v.ToArray());
+					results.Add(new KeyValuePair<byte[], byte[]>(k.ToArray(), v.ToArray()));
 				}
 
 				if (stop || current.RightPointer == 0)
@@ -150,6 +151,8 @@ namespace MiniDbEngine.Storage
 				//jump to the next sibling page instantly
 				current = _pm.ReadPage(current.RightPointer);
 			}
+
+			return results;
 		}
 
 		private int GetChildPageId(Page internalPage, ReadOnlySpan<byte> key)
